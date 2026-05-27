@@ -1,127 +1,122 @@
 const express  = require('express');
-const { getDb }        = require('../db');
+const { pool }         = require('../db');
 const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(authenticate);
 
-// GET /api/interviews/stats  (must be before /:registrationId routes)
-router.get('/stats', (req, res, next) => {
+// GET /api/interviews/stats  (must come before /:id routes)
+router.get('/stats', async (req, res, next) => {
   try {
-    const db  = getDb();
-    const row = db.prepare(`
+    const { rows } = await pool.query(`
       SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN status = 'pending'   THEN 1 ELSE 0 END) AS pending,
-        SUM(CASE WHEN status = 'scheduled' THEN 1 ELSE 0 END) AS scheduled,
-        SUM(CASE WHEN status = 'certified' THEN 1 ELSE 0 END) AS certified,
-        SUM(CASE WHEN status = 'declined'  THEN 1 ELSE 0 END) AS declined
+        COUNT(*)::integer                                                 AS total,
+        COUNT(*) FILTER (WHERE status = 'pending')::integer              AS pending,
+        COUNT(*) FILTER (WHERE status = 'scheduled')::integer            AS scheduled,
+        COUNT(*) FILTER (WHERE status = 'certified')::integer            AS certified,
+        COUNT(*) FILTER (WHERE status = 'declined')::integer             AS declined
       FROM registrations
-    `).get();
-    res.json({ stats: row });
+    `);
+    res.json({ stats: rows[0] });
   } catch (err) { next(err); }
 });
 
 // POST /api/interviews/:registrationId/comments
-router.post('/:registrationId/comments', (req, res, next) => {
+router.post('/:registrationId/comments', async (req, res, next) => {
   try {
-    const db = getDb();
     const { comment } = req.body;
-
-    if (!comment?.trim()) {
+    if (!comment?.trim())
       return res.status(400).json({ error: 'Comment text is required' });
-    }
 
-    const reg = db
-      .prepare('SELECT id, status FROM registrations WHERE id = ?')
-      .get(req.params.registrationId);
-
+    const { rows } = await pool.query(
+      'SELECT id, status FROM registrations WHERE id = $1', [req.params.registrationId]
+    );
+    const reg = rows[0];
     if (!reg) return res.status(404).json({ error: 'Registration not found' });
-
-    if (reg.status === 'certified' || reg.status === 'declined') {
+    if (reg.status === 'certified' || reg.status === 'declined')
       return res.status(409).json({ error: 'Cannot comment on a closed registration' });
-    }
 
     if (reg.status === 'pending') {
-      db.prepare("UPDATE registrations SET status = 'scheduled', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .run(reg.id);
+      await pool.query(
+        "UPDATE registrations SET status = 'scheduled', updated_at = NOW() WHERE id = $1",
+        [reg.id]
+      );
     }
 
-    const result = db.prepare(
-      'INSERT INTO interview_comments (registration_id, interviewer_id, comment) VALUES (?, ?, ?)'
-    ).run(reg.id, req.user.id, comment.trim());
+    const { rows: inserted } = await pool.query(
+      'INSERT INTO interview_comments (registration_id, interviewer_id, comment) VALUES ($1, $2, $3) RETURNING id',
+      [reg.id, req.user.id, comment.trim()]
+    );
 
-    const newComment = db.prepare(`
-      SELECT c.*, i.name AS interviewer_name
+    const { rows: newComment } = await pool.query(`
+      SELECT c.*, iv.name AS interviewer_name
       FROM interview_comments c
-      JOIN interviewers i ON i.id = c.interviewer_id
-      WHERE c.id = ?
-    `).get(result.lastInsertRowid);
+      JOIN interviewers iv ON iv.id = c.interviewer_id
+      WHERE c.id = $1
+    `, [inserted[0].id]);
 
-    res.status(201).json({ comment: newComment });
+    res.status(201).json({ comment: newComment[0] });
   } catch (err) { next(err); }
 });
 
 // PATCH /api/interviews/:registrationId/certify
-router.patch('/:registrationId/certify', (req, res, next) => {
+router.patch('/:registrationId/certify', async (req, res, next) => {
   try {
-    const db = getDb();
     const { comment } = req.body;
-
-    const reg = db
-      .prepare('SELECT id, status FROM registrations WHERE id = ?')
-      .get(req.params.registrationId);
-
+    const { rows } = await pool.query(
+      'SELECT id, status FROM registrations WHERE id = $1', [req.params.registrationId]
+    );
+    const reg = rows[0];
     if (!reg) return res.status(404).json({ error: 'Registration not found' });
     if (reg.status === 'certified') return res.status(409).json({ error: 'Already certified' });
 
     if (comment?.trim()) {
-      db.prepare('INSERT INTO interview_comments (registration_id, interviewer_id, comment) VALUES (?, ?, ?)')
-        .run(reg.id, req.user.id, comment.trim());
+      await pool.query(
+        'INSERT INTO interview_comments (registration_id, interviewer_id, comment) VALUES ($1, $2, $3)',
+        [reg.id, req.user.id, comment.trim()]
+      );
     }
+    await pool.query(
+      "UPDATE registrations SET status = 'certified', interviewer_id = $1, updated_at = NOW() WHERE id = $2",
+      [req.user.id, reg.id]
+    );
 
-    db.prepare(`
-      UPDATE registrations SET status = 'certified', interviewer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-    `).run(req.user.id, reg.id);
+    const { rows: updated } = await pool.query(`
+      SELECT r.*, iv.name AS interviewer_name FROM registrations r
+      LEFT JOIN interviewers iv ON iv.id = r.interviewer_id WHERE r.id = $1
+    `, [reg.id]);
 
-    const updated = db.prepare(`
-      SELECT r.*, i.name AS interviewer_name
-      FROM registrations r LEFT JOIN interviewers i ON i.id = r.interviewer_id
-      WHERE r.id = ?
-    `).get(reg.id);
-
-    res.json({ registration: updated });
+    res.json({ registration: updated[0] });
   } catch (err) { next(err); }
 });
 
 // PATCH /api/interviews/:registrationId/decline
-router.patch('/:registrationId/decline', (req, res, next) => {
+router.patch('/:registrationId/decline', async (req, res, next) => {
   try {
-    const db = getDb();
     const { comment } = req.body;
-
-    const reg = db
-      .prepare('SELECT id, status FROM registrations WHERE id = ?')
-      .get(req.params.registrationId);
-
+    const { rows } = await pool.query(
+      'SELECT id, status FROM registrations WHERE id = $1', [req.params.registrationId]
+    );
+    const reg = rows[0];
     if (!reg) return res.status(404).json({ error: 'Registration not found' });
 
     if (comment?.trim()) {
-      db.prepare('INSERT INTO interview_comments (registration_id, interviewer_id, comment) VALUES (?, ?, ?)')
-        .run(reg.id, req.user.id, comment.trim());
+      await pool.query(
+        'INSERT INTO interview_comments (registration_id, interviewer_id, comment) VALUES ($1, $2, $3)',
+        [reg.id, req.user.id, comment.trim()]
+      );
     }
+    await pool.query(
+      "UPDATE registrations SET status = 'declined', interviewer_id = $1, updated_at = NOW() WHERE id = $2",
+      [req.user.id, reg.id]
+    );
 
-    db.prepare(`
-      UPDATE registrations SET status = 'declined', interviewer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-    `).run(req.user.id, reg.id);
+    const { rows: updated } = await pool.query(`
+      SELECT r.*, iv.name AS interviewer_name FROM registrations r
+      LEFT JOIN interviewers iv ON iv.id = r.interviewer_id WHERE r.id = $1
+    `, [reg.id]);
 
-    const updated = db.prepare(`
-      SELECT r.*, i.name AS interviewer_name
-      FROM registrations r LEFT JOIN interviewers i ON i.id = r.interviewer_id
-      WHERE r.id = ?
-    `).get(reg.id);
-
-    res.json({ registration: updated });
+    res.json({ registration: updated[0] });
   } catch (err) { next(err); }
 });
 

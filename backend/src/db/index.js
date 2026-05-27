@@ -1,23 +1,26 @@
-const Database = require('better-sqlite3');
-const path     = require('path');
-const fs       = require('fs');
+const { Pool } = require('pg');
 
-const DB_PATH     = process.env.DB_PATH || path.join(__dirname, '../../baptism.db');
-const SCHEMA_PATH = path.join(__dirname, '../../schema.sql');
-
-let db;
-
-function getDb() {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-
-    // Run schema on first connection
-    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-    db.exec(schema);
-  }
-  return db;
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is not set.\n' +
+    'Create a free Neon database at https://neon.tech, copy the connection string,\n' +
+    'and add it to your .env file as DATABASE_URL=postgres://...'
+  );
 }
 
-module.exports = { getDb };
+// For Neon (and most cloud PG providers), SSL is required.
+// For a local PostgreSQL instance, SSL is not needed.
+const ssl = process.env.DATABASE_URL.includes('localhost') ||
+            process.env.DATABASE_URL.includes('127.0.0.1')
+  ? false
+  : { rejectUnauthorized: false };
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl,
+  max: 5, // keep low for serverless — each invocation gets its own pool
+  idleTimeoutMillis: 10_000,
+  connectionTimeoutMillis: 5_000,
+});
+
+module.exports = { pool };
