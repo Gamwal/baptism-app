@@ -244,7 +244,7 @@ function Step2({ data, inp, errors }) {
       <h2 className="section-title">Church Information</h2>
       <div className="form-grid">
         <Field label="Branch Church" required error={errors.branchChurch}>
-          <input {...inp('branchChurch')} placeholder="e.g. CAC Victory House" />
+          <input {...inp('branchChurch')} placeholder="e.g. Apostolic Faith Anthony" />
         </Field>
 
         <Field label="Zone">
@@ -256,7 +256,7 @@ function Step2({ data, inp, errors }) {
         </Field>
 
         <Field label="Group / Pastor's Name">
-          <input {...inp('groupPastorName')} placeholder="e.g. Pastor Oluwafemi Adeyemi" />
+          <input {...inp('groupPastorName')} placeholder="e.g. Brother Oluwafemi Adeyemi" />
         </Field>
       </div>
     </>
