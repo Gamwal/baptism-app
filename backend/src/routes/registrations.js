@@ -5,6 +5,16 @@ const { getNextInterviewSlot } = require('../utils/scheduler');
 
 const router = express.Router();
 
+const MINOR_AGE = 18;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidPhone(phone) {
+  if (!/^[\d\s+()-]+$/.test(phone)) return false;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 7 && digits.length <= 15;
+}
+
 async function generateRegNumber(pool) {
   const year = new Date().getFullYear();
   const { rows } = await pool.query(
@@ -15,22 +25,41 @@ async function generateRegNumber(pool) {
   return `WB-${year}-${seq}`;
 }
 
+/** Whole-year age from a YYYY-MM-DD string, or null if invalid. */
+function calcAge(dob) {
+  if (!dob) return null;
+  const b = new Date(dob);
+  if (Number.isNaN(b.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+  return age >= 0 ? age : null;
+}
+
 // POST /api/registrations  (public)
 router.post('/', async (req, res, next) => {
   try {
     const {
-      fullName, gender, dateOfBirth, age, maritalStatus,
+      fullName, gender, dateOfBirth, maritalStatus,
       residentialAddress, phoneNumber, email, occupation,
       nationality, stateOfOrigin,
       branchChurch, zone, area, groupPastorName,
-      salvationExperience, sanctificationExperience, holyGhostBaptism,
+      hasSalvation, salvationDate, salvationExperience,
+      hasSanctification, sanctificationDate, sanctificationExperience,
+      hasHolyGhost, holyGhostDate, holyGhostBaptism,
       previouslyBaptized, prevChurchName, prevModeOfBaptism, prevBaptismDate,
-      isMinor, guardianName, guardianPhone, guardianConsent, guardianSignature,
+      guardianName, guardianPhone, guardianConsent, guardianSignature,
     } = req.body;
+
+    // Age and minor status are derived from DOB on the server (not trusted from client)
+    const age     = calcAge(dateOfBirth);
+    const isMinor = age != null && age < MINOR_AGE;
 
     const missing = [];
     if (!fullName?.trim())           missing.push('Full Name');
     if (!gender)                     missing.push('Gender');
+    if (!dateOfBirth || age == null) missing.push('Valid Date of Birth');
     if (!maritalStatus)              missing.push('Marital Status');
     if (!residentialAddress?.trim()) missing.push('Residential Address');
     if (!phoneNumber?.trim())        missing.push('Phone Number');
@@ -38,9 +67,37 @@ router.post('/', async (req, res, next) => {
     if (isMinor) {
       if (!guardianName?.trim())  missing.push('Guardian Name');
       if (!guardianPhone?.trim()) missing.push('Guardian Phone');
+      if (!guardianConsent)       missing.push('Guardian Consent');
     }
     if (missing.length)
       return res.status(400).json({ error: `Required fields missing: ${missing.join(', ')}` });
+
+    // Format checks (phone required, email optional)
+    if (!isValidPhone(phoneNumber.trim()))
+      return res.status(400).json({ error: 'Please enter a valid phone number.' });
+    if (email?.trim() && !EMAIL_RE.test(email.trim()))
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+
+    // Each checked experience needs a date (description is optional)
+    if (hasSalvation && !salvationDate)
+      return res.status(400).json({ error: 'Salvation experience needs a date.' });
+    if (hasSanctification && !sanctificationDate)
+      return res.status(400).json({ error: 'Sanctification experience needs a date.' });
+    if (hasHolyGhost && !holyGhostDate)
+      return res.status(400).json({ error: 'Holy Ghost baptism needs a date.' });
+
+    // Experiences must be chronological: Salvation → Sanctification → Holy Ghost
+    const orderedDates = [
+      hasSalvation      && salvationDate      ? salvationDate      : null,
+      hasSanctification && sanctificationDate ? sanctificationDate : null,
+      hasHolyGhost      && holyGhostDate      ? holyGhostDate      : null,
+    ].filter(Boolean);
+    for (let k = 1; k < orderedDates.length; k++) {
+      if (orderedDates[k] < orderedDates[k - 1])
+        return res.status(400).json({
+          error: 'Experience dates must follow the order: Salvation → Sanctification → Holy Ghost Baptism.',
+        });
+    }
 
     const regNumber = await generateRegNumber(pool);
     const { interviewDate, interviewTime } = await getNextInterviewSlot(pool);
@@ -51,7 +108,9 @@ router.post('/', async (req, res, next) => {
         full_name, gender, date_of_birth, age, marital_status,
         residential_address, phone_number, email, occupation, nationality, state_of_origin,
         branch_church, zone, area, group_pastor_name,
-        salvation_experience, sanctification_experience, holy_ghost_baptism,
+        salvation_experience, salvation_date,
+        sanctification_experience, sanctification_date,
+        holy_ghost_baptism, holy_ghost_date,
         previously_baptized, prev_church_name, prev_mode_of_baptism, prev_baptism_date,
         is_minor, guardian_name, guardian_phone, guardian_consent, guardian_signature,
         interview_date, interview_time
@@ -60,18 +119,22 @@ router.post('/', async (req, res, next) => {
         $2,$3,$4,$5,$6,
         $7,$8,$9,$10,$11,$12,
         $13,$14,$15,$16,
-        $17,$18,$19,
-        $20,$21,$22,$23,
-        $24,$25,$26,$27,$28,
-        $29,$30
+        $17,$18,
+        $19,$20,
+        $21,$22,
+        $23,$24,$25,$26,
+        $27,$28,$29,$30,$31,
+        $32,$33
       ) RETURNING id
     `, [
       regNumber,
-      fullName.trim(), gender, dateOfBirth || null, age || null, maritalStatus,
+      fullName.trim(), gender, dateOfBirth || null, age != null ? String(age) : null, maritalStatus,
       residentialAddress.trim(), phoneNumber.trim(), email?.trim() || null,
       occupation?.trim() || null, nationality?.trim() || null, stateOfOrigin?.trim() || null,
       branchChurch.trim(), zone?.trim() || null, area?.trim() || null, groupPastorName?.trim() || null,
-      salvationExperience?.trim() || null, sanctificationExperience?.trim() || null, holyGhostBaptism?.trim() || null,
+      hasSalvation ? (salvationExperience?.trim() || null) : null,           hasSalvation ? salvationDate : null,
+      hasSanctification ? (sanctificationExperience?.trim() || null) : null, hasSanctification ? sanctificationDate : null,
+      hasHolyGhost ? (holyGhostBaptism?.trim() || null) : null,              hasHolyGhost ? holyGhostDate : null,
       previouslyBaptized ? 1 : 0,
       prevChurchName?.trim() || null, prevModeOfBaptism?.trim() || null, prevBaptismDate || null,
       isMinor ? 1 : 0,

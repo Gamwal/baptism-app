@@ -39,6 +39,28 @@ function InfoField({ label, value }) {
   );
 }
 
+function ExperienceView({ label, date, text }) {
+  // The experience was indicated if it has either a date or a description
+  if (!date && !text) {
+    return (
+      <div>
+        <div className="info-field__label">{label}</div>
+        <div className="info-field__value info-field__value--empty">Not indicated</div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="info-field__label">
+        {label}{date ? ` — ${date}` : ''}
+      </div>
+      <div className="info-field__value" style={{ whiteSpace: 'pre-wrap' }}>
+        {text || <span className="info-field__value--empty">No description provided</span>}
+      </div>
+    </div>
+  );
+}
+
 function Section({ title, children }) {
   return (
     <div className="card card--sm" style={{ marginBottom: '1rem' }}>
@@ -244,24 +266,9 @@ export default function CandidateDetail() {
         <div className="card card--sm" style={{ marginBottom: '1rem' }}>
           <h3 className="section-title">Spiritual Experiences</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div>
-              <div className="info-field__label">Salvation Experience</div>
-              <div className="info-field__value" style={{ whiteSpace: 'pre-wrap' }}>
-                {r.salvation_experience || <span className="info-field__value--empty">Not provided</span>}
-              </div>
-            </div>
-            <div>
-              <div className="info-field__label">Sanctification Experience</div>
-              <div className="info-field__value" style={{ whiteSpace: 'pre-wrap' }}>
-                {r.sanctification_experience || <span className="info-field__value--empty">Not provided</span>}
-              </div>
-            </div>
-            <div>
-              <div className="info-field__label">Baptism of the Holy Ghost</div>
-              <div className="info-field__value" style={{ whiteSpace: 'pre-wrap' }}>
-                {r.holy_ghost_baptism || <span className="info-field__value--empty">Not provided</span>}
-              </div>
-            </div>
+            <ExperienceView label="Salvation Experience"      date={r.salvation_date}      text={r.salvation_experience} />
+            <ExperienceView label="Sanctification Experience" date={r.sanctification_date} text={r.sanctification_experience} />
+            <ExperienceView label="Baptism of the Holy Ghost" date={r.holy_ghost_date}     text={r.holy_ghost_baptism} />
           </div>
         </div>
 

@@ -10,18 +10,13 @@ const { pool } = require('./index');
 async function setup() {
   const schema = fs.readFileSync(path.join(__dirname, '../../schema.pg.sql'), 'utf8');
 
-  // Split on semicolons, skip empty/whitespace-only statements
-  const statements = schema
-    .split(';')
-    .map(s => s.trim())
-    .filter(Boolean);
-
+  // Run the whole file in one simple query. Postgres parses `--` comments and
+  // multiple `;`-separated statements itself, so we don't have to split (and
+  // splitting would break on semicolons that appear inside comments).
   const client = await pool.connect();
   try {
-    for (const stmt of statements) {
-      await client.query(stmt);
-    }
-    console.log(`✓ Schema applied (${statements.length} statements)`);
+    await client.query(schema);
+    console.log('✓ Schema applied');
   } finally {
     client.release();
   }

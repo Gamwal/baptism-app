@@ -4,19 +4,43 @@ import { registerCandidate } from '../services/api';
 
 const STEPS = ['Personal', 'Church', 'Spiritual', 'Guardian', 'Review'];
 
+const MINOR_AGE = 18;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Phone is valid if it has 7–15 digits and only digits, spaces, +, -, (, ) characters. */
+function isValidPhone(phone) {
+  if (!/^[\d\s+()-]+$/.test(phone)) return false;
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 7 && digits.length <= 15;
+}
+
+/** Calculate whole-year age from a YYYY-MM-DD date string. Returns null if invalid/empty. */
+function calcAge(dob) {
+  if (!dob) return null;
+  const b = new Date(dob);
+  if (Number.isNaN(b.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+  return age >= 0 ? age : null;
+}
+
 const INITIAL = {
   // Personal
-  fullName: '', gender: '', dateOfBirth: '', age: '',
+  fullName: '', gender: '', dateOfBirth: '',
   maritalStatus: '', residentialAddress: '', phoneNumber: '',
   email: '', occupation: '', nationality: '', stateOfOrigin: '',
   // Church
   branchChurch: '', zone: '', area: '', groupPastorName: '',
-  // Spiritual
-  salvationExperience: '', sanctificationExperience: '', holyGhostBaptism: '',
+  // Spiritual — each experience has its own checkbox, date and description
+  hasSalvation: false,      salvationDate: '',      salvationExperience: '',
+  hasSanctification: false, sanctificationDate: '', sanctificationExperience: '',
+  hasHolyGhost: false,      holyGhostDate: '',      holyGhostBaptism: '',
   previouslyBaptized: false,
   prevChurchName: '', prevModeOfBaptism: '', prevBaptismDate: '',
-  // Guardian
-  isMinor: false,
+  // Guardian (auto-enabled when the candidate is a minor)
   guardianName: '', guardianPhone: '', guardianConsent: false, guardianSignature: '',
 };
 
@@ -62,6 +86,10 @@ export default function RegistrationForm() {
   const [submitting, setSub]  = useState(false);
   const [submitError, setSubError] = useState('');
 
+  // Derived from date of birth — never edited directly
+  const age     = calcAge(data.dateOfBirth);
+  const isMinor = age != null && age < MINOR_AGE;
+
   function set(field, value) {
     setData(d => ({ ...d, [field]: value }));
     if (errors[field]) setErrors(e => ({ ...e, [field]: '' }));
@@ -88,14 +116,35 @@ export default function RegistrationForm() {
     if (s === 1) {
       if (!data.fullName.trim())         e.fullName = 'Full name is required';
       if (!data.gender)                  e.gender = 'Please select a gender';
+      if (!data.dateOfBirth)             e.dateOfBirth = 'Date of birth is required';
+      else if (age == null)              e.dateOfBirth = 'Please enter a valid date of birth';
       if (!data.maritalStatus)           e.maritalStatus = 'Please select marital status';
       if (!data.residentialAddress.trim()) e.residentialAddress = 'Address is required';
       if (!data.phoneNumber.trim())      e.phoneNumber = 'Phone number is required';
+      else if (!isValidPhone(data.phoneNumber.trim())) e.phoneNumber = 'Enter a valid phone number';
+      if (data.email.trim() && !EMAIL_RE.test(data.email.trim())) e.email = 'Enter a valid email address';
     }
     if (s === 2) {
       if (!data.branchChurch.trim()) e.branchChurch = 'Branch church is required';
     }
-    if (s === 4 && data.isMinor) {
+    if (s === 3) {
+      // When an experience is checked its date is required; the description is optional
+      if (data.hasSalvation      && !data.salvationDate)      e.salvationDate = 'Please provide the date';
+      if (data.hasSanctification && !data.sanctificationDate) e.sanctificationDate = 'Please provide the date';
+      if (data.hasHolyGhost      && !data.holyGhostDate)      e.holyGhostDate = 'Please provide the date';
+      // Experiences must be chronological: Salvation → Sanctification → Holy Ghost
+      const ordered = [
+        data.hasSalvation      && data.salvationDate      ? { k: 'salvationDate',      d: data.salvationDate }      : null,
+        data.hasSanctification && data.sanctificationDate ? { k: 'sanctificationDate', d: data.sanctificationDate } : null,
+        data.hasHolyGhost      && data.holyGhostDate      ? { k: 'holyGhostDate',      d: data.holyGhostDate }      : null,
+      ].filter(Boolean);
+      for (let i = 1; i < ordered.length; i++) {
+        if (ordered[i].d < ordered[i - 1].d) {
+          e[ordered[i].k] = 'Dates must follow the order: Salvation → Sanctification → Holy Ghost Baptism';
+        }
+      }
+    }
+    if (s === 4 && isMinor) {
       if (!data.guardianName.trim())  e.guardianName = 'Guardian name is required';
       if (!data.guardianPhone.trim()) e.guardianPhone = 'Guardian phone is required';
       if (!data.guardianConsent)      e.guardianConsent = 'Guardian consent is required';
@@ -119,7 +168,12 @@ export default function RegistrationForm() {
     setSub(true);
     setSubError('');
     try {
-      const result = await registerCandidate(data);
+      const payload = {
+        ...data,
+        age: age != null ? String(age) : '',
+        isMinor,
+      };
+      const result = await registerCandidate(payload);
       navigate('/success', { state: result });
     } catch (err) {
       setSubError(err.message);
@@ -139,11 +193,11 @@ export default function RegistrationForm() {
           <StepIndicator current={step} />
 
           <div className="card">
-            {step === 1 && <Step1 data={data} set={set} inp={inp} sel={sel} errors={errors} />}
+            {step === 1 && <Step1 data={data} set={set} inp={inp} sel={sel} errors={errors} age={age} />}
             {step === 2 && <Step2 data={data} set={set} inp={inp} errors={errors} />}
             {step === 3 && <Step3 data={data} set={set} inp={inp} errors={errors} />}
-            {step === 4 && <Step4 data={data} set={set} inp={inp} errors={errors} />}
-            {step === 5 && <ReviewStep data={data} />}
+            {step === 4 && <Step4 data={data} set={set} inp={inp} errors={errors} isMinor={isMinor} age={age} />}
+            {step === 5 && <ReviewStep data={data} age={age} isMinor={isMinor} />}
 
             {submitError && (
               <div className="alert alert--error mt-2">{submitError}</div>
@@ -169,7 +223,7 @@ export default function RegistrationForm() {
 }
 
 /* ── Step 1: Personal Information ─────────────────────────────────────────── */
-function Step1({ data, set, inp, sel, errors }) {
+function Step1({ data, set, inp, sel, errors, age }) {
   return (
     <>
       <h2 className="section-title">Personal Information</h2>
@@ -192,12 +246,20 @@ function Step1({ data, set, inp, sel, errors }) {
           {errors.gender && <span className="form-error">{errors.gender}</span>}
         </Field>
 
-        <Field label="Date of Birth" hint="Or fill in Age below">
-          <input type="date" {...inp('dateOfBirth')} />
+        <Field label="Date of Birth" required error={errors.dateOfBirth}
+          hint="Used to calculate age">
+          <input type="date" max={new Date().toISOString().split('T')[0]} {...inp('dateOfBirth')} />
         </Field>
 
-        <Field label="Age" hint="Fill if Date of Birth is unknown">
-          <input {...inp('age')} placeholder="e.g. 25" />
+        <Field label="Age" hint="Calculated automatically from date of birth">
+          <input
+            className="form-input"
+            value={age != null ? `${age} year${age === 1 ? '' : 's'}` : ''}
+            placeholder="—"
+            readOnly
+            disabled
+            style={{ background: 'var(--gray-100)', cursor: 'not-allowed' }}
+          />
         </Field>
 
         <Field label="Marital Status" required error={errors.maritalStatus}>
@@ -217,7 +279,7 @@ function Step1({ data, set, inp, sel, errors }) {
           <input {...inp('residentialAddress')} placeholder="Street, City, State" className={`form-input${errors.residentialAddress ? ' error' : ''}`} />
         </Field>
 
-        <Field label="Email Address" hint="Optional">
+        <Field label="Email Address" hint="Optional" error={errors.email}>
           <input type="email" {...inp('email')} placeholder="you@example.com" />
         </Field>
 
@@ -264,39 +326,74 @@ function Step2({ data, inp, errors }) {
 }
 
 /* ── Step 3: Spiritual Experiences ───────────────────────────────────────── */
+function ExperienceBlock({ data, set, errors, flagKey, dateKey, descKey, title, placeholder }) {
+  const checked = data[flagKey];
+
+  function toggle(isOn) {
+    set(flagKey, isOn);
+    if (!isOn) { set(dateKey, ''); set(descKey, ''); } // clear when unchecked
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+
+  return (
+    <div style={{ marginBottom: '1rem' }}>
+      <label className="checkbox-option" style={{ marginBottom: checked ? '.75rem' : 0 }}>
+        <input type="checkbox" checked={checked} onChange={e => toggle(e.target.checked)} />
+        I have experienced {title}
+      </label>
+
+      {checked && (
+        <div className="conditional-section">
+          <Field label="Date of Experience" required error={errors[dateKey]}>
+            <input
+              type="date"
+              max={today}
+              className={`form-input${errors[dateKey] ? ' error' : ''}`}
+              value={data[dateKey]}
+              onChange={e => set(dateKey, e.target.value)}
+            />
+          </Field>
+
+          <div className="form-group" style={{ marginTop: '.75rem' }}>
+            <label className="form-label">Description</label>
+            <textarea
+              className="form-textarea"
+              value={data[descKey]}
+              onChange={e => set(descKey, e.target.value)}
+              placeholder={placeholder}
+            />
+            <span className="form-hint">Optional</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Step3({ data, set, inp, errors }) {
   return (
     <>
       <h2 className="section-title">Spiritual Experiences</h2>
-      <div className="form-grid">
-        <Field label="Salvation Experience"
-          hint="Briefly describe how and when you gave your life to Christ"
-          error={errors.salvationExperience}>
-          <div className="form-group--full">
-            <textarea {...inp('salvationExperience')}
-              className="form-textarea"
-              placeholder="e.g. I gave my life to Christ in 2018 at a crusade…" />
-          </div>
-        </Field>
+      <p className="text-muted" style={{ marginBottom: '1.25rem' }}>
+        Tick each experience you have had, then provide the date and a brief description.
+        Dates must be in order: Salvation first, then Sanctification, then Holy Ghost Baptism.
+      </p>
 
-        <Field label="Sanctification Experience"
-          hint="Have you experienced sanctification? Describe briefly">
-          <div className="form-group--full">
-            <textarea {...inp('sanctificationExperience')}
-              className="form-textarea"
-              placeholder="Describe your sanctification experience, if applicable…" />
-          </div>
-        </Field>
+      <ExperienceBlock data={data} set={set} errors={errors}
+        flagKey="hasSalvation" dateKey="salvationDate" descKey="salvationExperience"
+        title="Salvation"
+        placeholder="e.g. I gave my life to Christ in 2018 at a crusade…" />
 
-        <Field label="Baptism of the Holy Ghost"
-          hint="Have you received the baptism of the Holy Ghost? Describe briefly">
-          <div className="form-group--full">
-            <textarea {...inp('holyGhostBaptism')}
-              className="form-textarea"
-              placeholder="Describe your Holy Ghost baptism experience, if applicable…" />
-          </div>
-        </Field>
-      </div>
+      <ExperienceBlock data={data} set={set} errors={errors}
+        flagKey="hasSanctification" dateKey="sanctificationDate" descKey="sanctificationExperience"
+        title="Sanctification"
+        placeholder="Describe your sanctification experience…" />
+
+      <ExperienceBlock data={data} set={set} errors={errors}
+        flagKey="hasHolyGhost" dateKey="holyGhostDate" descKey="holyGhostBaptism"
+        title="Baptism of the Holy Ghost"
+        placeholder="Describe your Holy Ghost baptism experience…" />
 
       <hr className="divider" />
       <h2 className="section-title" style={{ marginTop: '1rem' }}>Previous Baptism</h2>
@@ -335,64 +432,72 @@ function Step3({ data, set, inp, errors }) {
 }
 
 /* ── Step 4: Parent / Guardian ────────────────────────────────────────────── */
-function Step4({ data, set, inp, errors }) {
+function Step4({ data, set, inp, errors, isMinor, age }) {
+  if (age == null) {
+    return (
+      <>
+        <h2 className="section-title">Parent / Guardian Information</h2>
+        <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--gray-400)' }}>
+          Please enter a date of birth in Step 1 so we can determine whether guardian
+          information is required.
+        </div>
+      </>
+    );
+  }
+
+  if (!isMinor) {
+    return (
+      <>
+        <h2 className="section-title">Parent / Guardian Information</h2>
+        <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--gray-400)' }}>
+          The candidate is {age} years old, so no guardian information is required.
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <h2 className="section-title">Parent / Guardian Information</h2>
-      <p className="text-muted" style={{ marginBottom: '1.25rem' }}>
-        Complete this section if the candidate is under 18 years of age.
-      </p>
+      <div className="notice" style={{ marginBottom: '1.25rem' }}>
+        The candidate is <strong>{age} years old</strong> (a minor). Guardian details below
+        are <strong>required</strong>.
+      </div>
 
-      <label className="checkbox-option" style={{ marginBottom: '1rem' }}>
-        <input type="checkbox" checked={data.isMinor}
-          onChange={e => set('isMinor', e.target.checked)} />
-        This candidate is a minor (under 18 years old)
-      </label>
+      <div className="conditional-section">
+        <div className="form-grid">
+          <Field label="Parent / Guardian's Name" required error={errors.guardianName}>
+            <input {...inp('guardianName')} placeholder="Full name of parent or guardian" />
+          </Field>
 
-      {data.isMinor && (
-        <div className="conditional-section">
-          <div className="form-grid">
-            <Field label="Parent / Guardian's Name" required error={errors.guardianName}>
-              <input {...inp('guardianName')} placeholder="Full name of parent or guardian" />
-            </Field>
+          <Field label="Parent / Guardian's Phone" required error={errors.guardianPhone}>
+            <input {...inp('guardianPhone')} placeholder="+234 800 000 0000" />
+          </Field>
 
-            <Field label="Parent / Guardian's Phone" required error={errors.guardianPhone}>
-              <input {...inp('guardianPhone')} placeholder="+234 800 000 0000" />
-            </Field>
+          <Field label="Guardian's Signature" hint="Type full name as digital signature">
+            <input {...inp('guardianSignature')} placeholder="Type full name to sign" />
+          </Field>
 
-            <Field label="Guardian's Signature" hint="Type full name as digital signature">
-              <input {...inp('guardianSignature')} placeholder="Type full name to sign" />
-            </Field>
-
-            <div className="form-group">
-              <label className="checkbox-option" style={{ marginTop: '1.5rem' }}>
-                <input type="checkbox" checked={data.guardianConsent}
-                  onChange={e => set('guardianConsent', e.target.checked)} />
-                I consent to this candidate's water baptism
-              </label>
-              {errors.guardianConsent && (
-                <span className="form-error" style={{ display: 'block', marginTop: '.3rem' }}>
-                  {errors.guardianConsent}
-                </span>
-              )}
-            </div>
+          <div className="form-group">
+            <label className="checkbox-option" style={{ marginTop: '1.5rem' }}>
+              <input type="checkbox" checked={data.guardianConsent}
+                onChange={e => set('guardianConsent', e.target.checked)} />
+              I consent to this candidate's water baptism <span className="required"> *</span>
+            </label>
+            {errors.guardianConsent && (
+              <span className="form-error" style={{ display: 'block', marginTop: '.3rem' }}>
+                {errors.guardianConsent}
+              </span>
+            )}
           </div>
         </div>
-      )}
-
-      {!data.isMinor && (
-        <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--gray-400)' }}>
-          No guardian information needed for adults.
-          <br />
-          <small>Check the box above only if the candidate is under 18.</small>
-        </div>
-      )}
+      </div>
     </>
   );
 }
 
 /* ── Step 5: Review ───────────────────────────────────────────────────────── */
-function ReviewStep({ data }) {
+function ReviewStep({ data, age, isMinor }) {
   const fmt = v => v || <span style={{ color: 'var(--gray-400)', fontStyle: 'italic' }}>—</span>;
 
   return (
@@ -406,7 +511,7 @@ function ReviewStep({ data }) {
         <ReviewField label="Full Name"          value={fmt(data.fullName)} />
         <ReviewField label="Gender"             value={fmt(data.gender)} />
         <ReviewField label="Date of Birth"      value={fmt(data.dateOfBirth)} />
-        <ReviewField label="Age"                value={fmt(data.age)} />
+        <ReviewField label="Age"                value={age != null ? `${age} years` : fmt('')} />
         <ReviewField label="Marital Status"     value={fmt(data.maritalStatus)} />
         <ReviewField label="Phone Number"       value={fmt(data.phoneNumber)} />
         <ReviewField label="Email"              value={fmt(data.email)} />
@@ -424,9 +529,12 @@ function ReviewStep({ data }) {
       </ReviewSection>
 
       <ReviewSection title="Spiritual Experiences">
-        <ReviewField label="Salvation Experience"      value={fmt(data.salvationExperience)} full />
-        <ReviewField label="Sanctification Experience" value={fmt(data.sanctificationExperience)} full />
-        <ReviewField label="Holy Ghost Baptism"        value={fmt(data.holyGhostBaptism)} full />
+        <ReviewField label="Salvation"
+          value={data.hasSalvation ? `${data.salvationDate || '—'} · ${data.salvationExperience || ''}` : 'Not indicated'} full />
+        <ReviewField label="Sanctification"
+          value={data.hasSanctification ? `${data.sanctificationDate || '—'} · ${data.sanctificationExperience || ''}` : 'Not indicated'} full />
+        <ReviewField label="Holy Ghost Baptism"
+          value={data.hasHolyGhost ? `${data.holyGhostDate || '—'} · ${data.holyGhostBaptism || ''}` : 'Not indicated'} full />
         <ReviewField label="Previously Baptized"       value={data.previouslyBaptized ? 'Yes' : 'No'} />
         {data.previouslyBaptized && <>
           <ReviewField label="Previous Church"    value={fmt(data.prevChurchName)} />
@@ -435,7 +543,7 @@ function ReviewStep({ data }) {
         </>}
       </ReviewSection>
 
-      {data.isMinor && (
+      {isMinor && (
         <ReviewSection title="Parent / Guardian">
           <ReviewField label="Guardian Name"   value={fmt(data.guardianName)} />
           <ReviewField label="Guardian Phone"  value={fmt(data.guardianPhone)} />

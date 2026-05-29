@@ -33,10 +33,13 @@ CREATE TABLE IF NOT EXISTS registrations (
   area                    TEXT,
   group_pastor_name       TEXT,
 
-  -- Spiritual Experiences
+  -- Spiritual Experiences (each optional, date recorded when present)
   salvation_experience        TEXT,
+  salvation_date              TEXT,
   sanctification_experience   TEXT,
+  sanctification_date         TEXT,
   holy_ghost_baptism          TEXT,
+  holy_ghost_date             TEXT,
 
   -- Previous Baptism
   previously_baptized     INTEGER      DEFAULT 0,
@@ -74,3 +77,8 @@ CREATE INDEX IF NOT EXISTS idx_reg_number     ON registrations(reg_number);
 CREATE INDEX IF NOT EXISTS idx_reg_status     ON registrations(status);
 CREATE INDEX IF NOT EXISTS idx_reg_interview  ON registrations(interview_date, interview_time);
 CREATE INDEX IF NOT EXISTS idx_comment_reg    ON interview_comments(registration_id);
+
+-- Migrations for existing databases (safe to re-run)
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS salvation_date      TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS sanctification_date TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS holy_ghost_date     TEXT;
