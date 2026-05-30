@@ -73,3 +73,12 @@ export const createInterviewer = (data) =>
 
 export const deleteInterviewer = (id) =>
   request(`/interviewers/${id}`, { method: 'DELETE' });
+
+// ── Church directory (public; cascading dropdowns) ──────────────────────────
+export const getAreas = () => request('/church/areas');
+
+export const getZones = (areaId) =>
+  request(`/church/zones?areaId=${encodeURIComponent(areaId)}`);
+
+export const getBranches = (zoneId, areaId) =>
+  request(`/church/branches?zoneId=${encodeURIComponent(zoneId)}&areaId=${encodeURIComponent(areaId || '')}`);

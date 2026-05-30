@@ -27,10 +27,13 @@ CREATE TABLE IF NOT EXISTS registrations (
   nationality             TEXT,
   state_of_origin         TEXT,
 
-  -- Church Information
+  -- Church Information (names selected from AFM directory; ids kept for traceability)
   branch_church           TEXT         NOT NULL,
+  branch_id               TEXT,
   zone                    TEXT,
+  zone_id                 TEXT,
   area                    TEXT,
+  area_id                 TEXT,
   group_pastor_name       TEXT,
 
   -- Spiritual Experiences (each optional, date recorded when present)
@@ -82,3 +85,6 @@ CREATE INDEX IF NOT EXISTS idx_comment_reg    ON interview_comments(registration
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS salvation_date      TEXT;
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS sanctification_date TEXT;
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS holy_ghost_date     TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS area_id             TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS zone_id             TEXT;
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS branch_id           TEXT;

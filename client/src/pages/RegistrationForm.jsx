@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { registerCandidate } from '../services/api';
+import { registerCandidate, getAreas, getZones, getBranches } from '../services/api';
 
 const STEPS = ['Personal', 'Church', 'Spiritual', 'Guardian', 'Review'];
 
@@ -32,8 +32,11 @@ const INITIAL = {
   fullName: '', gender: '', dateOfBirth: '',
   maritalStatus: '', residentialAddress: '', phoneNumber: '',
   email: '', occupation: '', nationality: '', stateOfOrigin: '',
-  // Church
-  branchChurch: '', zone: '', area: '', groupPastorName: '',
+  // Church — names come from AFM directory; ids kept so we can link back
+  area: '', areaId: '',
+  zone: '', zoneId: '',
+  branchChurch: '', branchChurchId: '',
+  groupPastorName: '',
   // Spiritual — each experience has its own checkbox, date and description
   hasSalvation: false,      salvationDate: '',      salvationExperience: '',
   hasSanctification: false, sanctificationDate: '', sanctificationExperience: '',
@@ -125,7 +128,9 @@ export default function RegistrationForm() {
       if (data.email.trim() && !EMAIL_RE.test(data.email.trim())) e.email = 'Enter a valid email address';
     }
     if (s === 2) {
-      if (!data.branchChurch.trim()) e.branchChurch = 'Branch church is required';
+      if (!data.areaId)             e.area         = 'Please select an area';
+      if (!data.zoneId)             e.zone         = 'Please select a zone';
+      if (!data.branchChurchId)     e.branchChurch = 'Please select a branch church';
     }
     if (s === 3) {
       // When an experience is checked its date is required; the description is optional
@@ -300,21 +305,120 @@ function Step1({ data, set, inp, sel, errors, age }) {
 }
 
 /* ── Step 2: Church Information ───────────────────────────────────────────── */
-function Step2({ data, inp, errors }) {
+function Step2({ data, set, inp, errors }) {
+  const [areas,    setAreas]    = useState([]);
+  const [zones,    setZones]    = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [loading,  setLoading]  = useState({ areas: false, zones: false, branches: false });
+  const [loadErr,  setLoadErr]  = useState('');
+
+  // Areas: load once
+  useEffect(() => {
+    setLoading(l => ({ ...l, areas: true }));
+    getAreas()
+      .then(({ areas }) => setAreas(areas))
+      .catch(err => setLoadErr(`Couldn't load areas: ${err.message}`))
+      .finally(() => setLoading(l => ({ ...l, areas: false })));
+  }, []);
+
+  // Zones: reload whenever area changes
+  useEffect(() => {
+    if (!data.areaId) { setZones([]); return; }
+    setLoading(l => ({ ...l, zones: true }));
+    getZones(data.areaId)
+      .then(({ zones }) => setZones(zones))
+      .catch(err => setLoadErr(`Couldn't load zones: ${err.message}`))
+      .finally(() => setLoading(l => ({ ...l, zones: false })));
+  }, [data.areaId]);
+
+  // Branches: reload whenever zone changes
+  useEffect(() => {
+    if (!data.zoneId) { setBranches([]); return; }
+    setLoading(l => ({ ...l, branches: true }));
+    getBranches(data.zoneId, data.areaId)
+      .then(({ branches }) => setBranches(branches))
+      .catch(err => setLoadErr(`Couldn't load branches: ${err.message}`))
+      .finally(() => setLoading(l => ({ ...l, branches: false })));
+  }, [data.zoneId, data.areaId]);
+
+  function pickArea(e) {
+    const id = e.target.value;
+    const a  = areas.find(x => x.id === id);
+    set('areaId', id);
+    set('area',   a?.name || '');
+    // Clear downstream selections so user can't keep a stale zone/branch
+    set('zoneId', ''); set('zone', '');
+    set('branchChurchId', ''); set('branchChurch', '');
+  }
+
+  function pickZone(e) {
+    const id = e.target.value;
+    const z  = zones.find(x => x.id === id);
+    set('zoneId', id);
+    set('zone',   z?.name || '');
+    set('branchChurchId', ''); set('branchChurch', '');
+  }
+
+  function pickBranch(e) {
+    const id = e.target.value;
+    const b  = branches.find(x => x.id === id);
+    set('branchChurchId', id);
+    set('branchChurch',   b?.name || '');
+  }
+
   return (
     <>
       <h2 className="section-title">Church Information</h2>
+
+      {loadErr && <div className="alert alert--error" style={{ marginBottom: '1rem' }}>{loadErr}</div>}
+
       <div className="form-grid">
+        <Field label="Area" required error={errors.area}>
+          <select
+            className={`form-select${errors.area ? ' error' : ''}`}
+            value={data.areaId}
+            onChange={pickArea}
+            disabled={loading.areas}
+          >
+            <option value="">
+              {loading.areas ? 'Loading areas…' : '— Select area —'}
+            </option>
+            {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Zone" required error={errors.zone}>
+          <select
+            className={`form-select${errors.zone ? ' error' : ''}`}
+            value={data.zoneId}
+            onChange={pickZone}
+            disabled={!data.areaId || loading.zones}
+          >
+            <option value="">
+              {!data.areaId    ? 'Select an area first'
+               : loading.zones ? 'Loading zones…'
+               : zones.length === 0 ? 'No zones available'
+               : '— Select zone —'}
+            </option>
+            {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+          </select>
+        </Field>
+
         <Field label="Branch Church" required error={errors.branchChurch}>
-          <input {...inp('branchChurch')} placeholder="e.g. Apostolic Faith Anthony" />
-        </Field>
-
-        <Field label="Zone">
-          <input {...inp('zone')} placeholder="e.g. Lagos Zone A" />
-        </Field>
-
-        <Field label="Area">
-          <input {...inp('area')} placeholder="e.g. Surulere Area" />
+          <select
+            className={`form-select${errors.branchChurch ? ' error' : ''}`}
+            value={data.branchChurchId}
+            onChange={pickBranch}
+            disabled={!data.zoneId || loading.branches}
+          >
+            <option value="">
+              {!data.zoneId       ? 'Select a zone first'
+               : loading.branches ? 'Loading branches…'
+               : branches.length === 0 ? 'No branches available'
+               : '— Select branch —'}
+            </option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
         </Field>
 
         <Field label="Group / Pastor's Name">

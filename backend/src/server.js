@@ -15,6 +15,7 @@ app.use('/api/auth',          require('./routes/auth'));
 app.use('/api/registrations', require('./routes/registrations'));
 app.use('/api/interviews',    require('./routes/interviews'));
 app.use('/api/interviewers',  require('./routes/interviewers'));
+app.use('/api/church',        require('./routes/church'));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date() }));
 
