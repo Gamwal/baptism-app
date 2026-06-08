@@ -108,10 +108,9 @@ async function generatePdf({ regNumber, interviewDate, interviewTime }) {
   doc.setTextColor(60, 60, 60);
   const instructions = [
     '1.  Take note of your registration number and interview time — you will need them.',
-    '2.  Bring this printed slip and a valid means of identification.',
+    '2.  Bring this electronic slip along for your interview.',
     '3.  Arrive at the church office at least 10 minutes before your interview time.',
     '4.  If you cannot make this slot, contact the church office to reschedule.',
-    '5.  Dress modestly; bring a notebook and a Bible if you have one.',
   ];
   let y = 168;
   for (const line of instructions) {

@@ -27,9 +27,9 @@ export default function Navbar() {
                 <Link to="/interviewer/settings" className="navbar__link">Settings</Link>
               </>
             )}
-            <span className="navbar__link" style={{ opacity: .6 }}>
+            <Link to="/interviewer/password" className="navbar__link" title="Change password">
               {user.name}
-            </span>
+            </Link>
             <button className="navbar__btn" onClick={handleLogout}>Log out</button>
           </>
         ) : (

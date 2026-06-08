@@ -31,6 +31,12 @@ export const login = (email, password) =>
 
 export const getMe = () => request('/auth/me');
 
+export const changePassword = (currentPassword, newPassword) =>
+  request('/auth/password', {
+    method: 'PATCH',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+
 // ── Registrations ─────────────────────────────────────────────────────────────
 export const registerCandidate = (data) =>
   request('/registrations', { method: 'POST', body: JSON.stringify(data) });
