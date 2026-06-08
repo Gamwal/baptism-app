@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { registerCandidate, getAreas, getZones, getBranches } from '../services/api';
+import { AFC_LOGO, JESUS_MARK, CHURCH_NAME } from '../components/Logo';
 
 const STEPS = ['Personal', 'Church', 'Spiritual', 'Guardian', 'Review'];
 
@@ -189,8 +190,21 @@ export default function RegistrationForm() {
   return (
     <>
       <div className="page-hero">
+        <img
+          src={AFC_LOGO}
+          alt="Apostolic Faith Church"
+          style={{ width: 92, height: 92, objectFit: 'contain', margin: '0 auto .75rem', display: 'block', filter: 'drop-shadow(0 4px 10px rgba(0,0,0,.25))' }}
+        />
+        <div style={{ fontSize: '.95rem', fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', opacity: .85, marginBottom: '.2rem' }}>
+          {CHURCH_NAME}
+        </div>
         <h1 className="page-hero__title">Water Baptism Registration</h1>
         <p className="page-hero__sub">Fill in the form below to register for water baptism. You will receive an interview date and tracking number.</p>
+        <img
+          src={JESUS_MARK}
+          alt="Jesus the Light of the World"
+          style={{ height: 38, marginTop: '.9rem', filter: 'brightness(1.05) drop-shadow(0 1px 2px rgba(0,0,0,.4))' }}
+        />
       </div>
 
       <main className="form-page">

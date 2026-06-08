@@ -74,6 +74,24 @@ export const createInterviewer = (data) =>
 export const deleteInterviewer = (id) =>
   request(`/interviewers/${id}`, { method: 'DELETE' });
 
+// ── Interview slot settings ──────────────────────────────────────────────────
+export const getSettings    = ()        => request('/settings');
+export const updateSettings = (payload) =>
+  request('/settings', { method: 'PATCH', body: JSON.stringify(payload) });
+
+// ── Excel export (admin only) ─ returns a Blob ───────────────────────────────
+export async function exportRegistrationsXlsx() {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${BASE}/registrations/export`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Export failed (${res.status})`);
+  }
+  return res.blob();
+}
+
 // ── Church directory (public; cascading dropdowns) ──────────────────────────
 export const getAreas = () => request('/church/areas');
 

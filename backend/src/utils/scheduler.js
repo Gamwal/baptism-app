@@ -1,14 +1,35 @@
 /**
- * Finds the next available 30-minute interview slot.
- * Days: Monday–Saturday, 09:00–16:30.
- * Minimum lead time: 3 days from today.
+ * Finds the next available interview slot, honouring the admin-configured
+ * `interview_settings` table (slot length, working hours, lead days, days of week).
+ * Falls back to sensible defaults if the row is missing.
  */
+const DEFAULTS = {
+  slot_minutes: 15,
+  start_hour:   9,
+  end_hour:     17,
+  lead_days:    3,
+  days_of_week: '1,2,3,4,5,6',  // Mon–Sat
+};
+
+async function getSettings(pool) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT slot_minutes, start_hour, end_hour, lead_days, days_of_week FROM interview_settings WHERE id = 1'
+    );
+    return rows[0] || DEFAULTS;
+  } catch {
+    return DEFAULTS;
+  }
+}
+
 async function getNextInterviewSlot(pool) {
-  const SLOT_MINUTES = 30;
-  const START_HOUR   = 9;
-  const END_HOUR     = 17; // last slot starts 16:30
-  const LEAD_DAYS    = 3;
-  const MAX_SEARCH   = 120;
+  const s = await getSettings(pool);
+  const SLOT_MINUTES = s.slot_minutes;
+  const START_HOUR   = s.start_hour;
+  const END_HOUR     = s.end_hour;
+  const LEAD_DAYS    = s.lead_days;
+  const allowedDays  = String(s.days_of_week).split(',').map(n => parseInt(n, 10));
+  const MAX_SEARCH   = 180;
 
   const base = new Date();
   base.setHours(0, 0, 0, 0);
@@ -18,7 +39,7 @@ async function getNextInterviewSlot(pool) {
     const candidate = new Date(base);
     candidate.setDate(base.getDate() + d);
 
-    if (candidate.getDay() === 0) continue; // skip Sunday
+    if (!allowedDays.includes(candidate.getDay())) continue;
 
     const dateStr = candidate.toISOString().split('T')[0];
 
@@ -34,7 +55,7 @@ async function getNextInterviewSlot(pool) {
     }
   }
 
-  throw new Error('No available interview slots in the next 120 days');
+  throw new Error('No available interview slots in the configured window');
 }
 
-module.exports = { getNextInterviewSlot };
+module.exports = { getNextInterviewSlot, getSettings };

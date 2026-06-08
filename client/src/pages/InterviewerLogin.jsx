@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { login } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { AFC_LOGO, CHURCH_NAME } from '../components/Logo';
 
 export default function InterviewerLogin() {
   const { user, saveLogin } = useAuth();
@@ -33,9 +34,13 @@ export default function InterviewerLogin() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-card__logo">
-          <div className="icon">🕊️</div>
-          <h1>Interviewer Portal</h1>
-          <p>Water Baptism Registry</p>
+          <img
+            src={AFC_LOGO}
+            alt="Apostolic Faith Church"
+            style={{ width: 64, height: 64, objectFit: 'contain', margin: '0 auto' }}
+          />
+          <h1>{CHURCH_NAME}</h1>
+          <p>Interviewer Portal · Water Baptism Registry</p>
         </div>
 
         {error && <div className="alert alert--error">{error}</div>}

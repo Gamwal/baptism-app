@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Logo from './Logo';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -12,9 +13,8 @@ export default function Navbar() {
 
   return (
     <nav className="navbar">
-      <Link to="/" className="navbar__brand">
-        <span className="icon">🕊️</span>
-        Water Baptism Registry
+      <Link to="/" className="navbar__brand" style={{ textDecoration: 'none' }}>
+        <Logo size={32} color="#ffffff" />
       </Link>
 
       <div className="navbar__links">
@@ -22,7 +22,10 @@ export default function Navbar() {
           <>
             <Link to="/interviewer/dashboard" className="navbar__link">Dashboard</Link>
             {user.role === 'admin' && (
-              <Link to="/interviewer/manage" className="navbar__link">Interviewers</Link>
+              <>
+                <Link to="/interviewer/manage" className="navbar__link">Interviewers</Link>
+                <Link to="/interviewer/settings" className="navbar__link">Settings</Link>
+              </>
             )}
             <span className="navbar__link" style={{ opacity: .6 }}>
               {user.name}

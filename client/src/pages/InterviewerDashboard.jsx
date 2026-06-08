@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { getRegistrations, getStats } from '../services/api';
+import { getRegistrations, getStats, exportRegistrationsXlsx } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const STATUS_LABELS = {
   all: 'All', pending: 'Pending', scheduled: 'Scheduled',
@@ -25,6 +26,7 @@ function formatTime(t) {
 }
 
 export default function InterviewerDashboard() {
+  const { user } = useAuth();
   const [registrations, setRegistrations] = useState([]);
   const [stats, setStats]   = useState(null);
   const [total, setTotal]   = useState(0);
@@ -32,7 +34,27 @@ export default function InterviewerDashboard() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const LIMIT = 20;
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const blob = await exportRegistrationsXlsx();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url;
+      a.download = `baptism-registrations-${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Export failed: ${err.message}`);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,9 +83,21 @@ export default function InterviewerDashboard() {
   return (
     <main className="dashboard">
       <div className="container container--wide">
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: '1.5rem', color: 'var(--gray-900)' }}>
-          Baptism Candidates Dashboard
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.75rem', marginBottom: '1.5rem' }}>
+          <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--gray-900)' }}>
+            Baptism Candidates Dashboard
+          </h1>
+          {user?.role === 'admin' && (
+            <button
+              type="button"
+              className="btn btn--outline"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              {exporting ? <><span className="spinner" /> Exporting…</> : '⬇️  Export to Excel'}
+            </button>
+          )}
+        </div>
 
         {/* Stats */}
         {stats && (

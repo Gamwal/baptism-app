@@ -9,6 +9,7 @@ import InterviewerLogin    from './pages/InterviewerLogin';
 import InterviewerDashboard from './pages/InterviewerDashboard';
 import CandidateDetail     from './pages/CandidateDetail';
 import ManageInterviewers  from './pages/ManageInterviewers';
+import SettingsPage        from './pages/SettingsPage';
 
 export default function App() {
   return (
@@ -28,6 +29,9 @@ export default function App() {
             } />
             <Route path="/interviewer/manage" element={
               <ProtectedRoute><ManageInterviewers /></ProtectedRoute>
+            } />
+            <Route path="/interviewer/settings" element={
+              <ProtectedRoute><SettingsPage /></ProtectedRoute>
             } />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

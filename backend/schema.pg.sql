@@ -76,6 +76,19 @@ CREATE TABLE IF NOT EXISTS interview_comments (
   created_at      TIMESTAMPTZ  DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Single-row settings table that the slot scheduler consults
+CREATE TABLE IF NOT EXISTS interview_settings (
+  id            INTEGER     PRIMARY KEY,
+  slot_minutes  INTEGER     NOT NULL DEFAULT 15,
+  start_hour    INTEGER     NOT NULL DEFAULT 9,
+  end_hour      INTEGER     NOT NULL DEFAULT 17,
+  lead_days     INTEGER     NOT NULL DEFAULT 3,
+  days_of_week  TEXT        NOT NULL DEFAULT '1,2,3,4,5,6',  -- 0=Sun..6=Sat
+  updated_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+  CHECK (id = 1)
+);
+INSERT INTO interview_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS idx_reg_number     ON registrations(reg_number);
 CREATE INDEX IF NOT EXISTS idx_reg_status     ON registrations(status);
 CREATE INDEX IF NOT EXISTS idx_reg_interview  ON registrations(interview_date, interview_time);

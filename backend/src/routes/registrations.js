@@ -1,6 +1,7 @@
 const express  = require('express');
-const { pool }               = require('../db');
-const { authenticate }       = require('../middleware/auth');
+const ExcelJS  = require('exceljs');
+const { pool }                       = require('../db');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 const { getNextInterviewSlot } = require('../utils/scheduler');
 
 const router = express.Router();
@@ -188,6 +189,79 @@ router.get('/', authenticate, async (req, res, next) => {
     ]);
 
     res.json({ registrations: rows, total: countRes.rows[0].total, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/registrations/export  (admin only — Excel spool of every column)
+router.get('/export', authenticate, requireAdmin, async (_req, res, next) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT r.*, iv.name AS interviewer_name
+      FROM registrations r
+      LEFT JOIN interviewers iv ON iv.id = r.interviewer_id
+      ORDER BY r.created_at DESC
+    `);
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator     = 'Water Baptism Registry';
+    wb.created     = new Date();
+    const ws = wb.addWorksheet('Registrations');
+
+    ws.columns = [
+      { header: 'Reg Number',          key: 'reg_number',                width: 18 },
+      { header: 'Status',              key: 'status',                    width: 12 },
+      { header: 'Full Name',           key: 'full_name',                 width: 28 },
+      { header: 'Gender',              key: 'gender',                    width: 10 },
+      { header: 'Date of Birth',       key: 'date_of_birth',             width: 14 },
+      { header: 'Age',                 key: 'age',                       width: 8  },
+      { header: 'Marital Status',      key: 'marital_status',            width: 14 },
+      { header: 'Phone',               key: 'phone_number',              width: 18 },
+      { header: 'Email',               key: 'email',                     width: 26 },
+      { header: 'Occupation',          key: 'occupation',                width: 20 },
+      { header: 'Address',             key: 'residential_address',       width: 36 },
+      { header: 'Nationality',         key: 'nationality',               width: 14 },
+      { header: 'State of Origin',     key: 'state_of_origin',           width: 16 },
+      { header: 'Area',                key: 'area',                      width: 16 },
+      { header: 'Zone',                key: 'zone',                      width: 16 },
+      { header: 'Branch Church',       key: 'branch_church',             width: 22 },
+      { header: 'Group / Pastor',      key: 'group_pastor_name',         width: 22 },
+      { header: 'Salvation Date',      key: 'salvation_date',            width: 14 },
+      { header: 'Salvation',           key: 'salvation_experience',      width: 40 },
+      { header: 'Sanctification Date', key: 'sanctification_date',       width: 14 },
+      { header: 'Sanctification',      key: 'sanctification_experience', width: 40 },
+      { header: 'Holy Ghost Date',     key: 'holy_ghost_date',           width: 14 },
+      { header: 'Holy Ghost Baptism',  key: 'holy_ghost_baptism',        width: 40 },
+      { header: 'Previously Baptized', key: 'previously_baptized',       width: 18 },
+      { header: 'Prev. Church',        key: 'prev_church_name',          width: 22 },
+      { header: 'Prev. Mode',          key: 'prev_mode_of_baptism',      width: 14 },
+      { header: 'Prev. Date',          key: 'prev_baptism_date',         width: 14 },
+      { header: 'Is Minor',            key: 'is_minor',                  width: 10 },
+      { header: 'Guardian Name',       key: 'guardian_name',             width: 22 },
+      { header: 'Guardian Phone',      key: 'guardian_phone',            width: 18 },
+      { header: 'Guardian Consent',    key: 'guardian_consent',          width: 16 },
+      { header: 'Interview Date',      key: 'interview_date',            width: 14 },
+      { header: 'Interview Time',      key: 'interview_time',            width: 12 },
+      { header: 'Interviewer',         key: 'interviewer_name',          width: 22 },
+      { header: 'Registered At',       key: 'created_at',                width: 22 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    for (const r of rows) {
+      ws.addRow({
+        ...r,
+        previously_baptized: r.previously_baptized ? 'Yes' : 'No',
+        is_minor:            r.is_minor ? 'Yes' : 'No',
+        guardian_consent:    r.guardian_consent ? 'Yes' : 'No',
+      });
+    }
+
+    const fileName = `baptism-registrations-${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    await wb.xlsx.write(res);
+    res.end();
   } catch (err) { next(err); }
 });
 
