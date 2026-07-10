@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { registerCandidate, getAreas, getZones, getBranches } from '../services/api';
 import { AFC_LOGO, JESUS_MARK, CHURCH_NAME } from '../components/Logo';
+import { todayLocalDateStr } from '../utils/format';
 
 const STEPS = ['Personal', 'Church', 'Spiritual', 'Guardian', 'Review'];
 
@@ -267,7 +268,7 @@ function Step1({ data, set, inp, sel, errors, age }) {
 
         <Field label="Date of Birth" required error={errors.dateOfBirth}
           hint="Used to calculate age">
-          <input type="date" max={new Date().toISOString().split('T')[0]} {...inp('dateOfBirth')} />
+          <input type="date" max={todayLocalDateStr()} {...inp('dateOfBirth')} />
         </Field>
 
         <Field label="Age" hint="Calculated automatically from date of birth">
@@ -452,7 +453,7 @@ function ExperienceBlock({ data, set, errors, flagKey, dateKey, descKey, title, 
     if (!isOn) { set(dateKey, ''); set(descKey, ''); } // clear when unchecked
   }
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocalDateStr();
 
   return (
     <div style={{ marginBottom: '1rem' }}>

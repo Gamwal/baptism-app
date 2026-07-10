@@ -33,7 +33,10 @@ export default function Navbar() {
             <button className="navbar__btn" onClick={handleLogout}>Log out</button>
           </>
         ) : (
-          <Link to="/interviewer/login" className="navbar__link">Interviewer Login</Link>
+          <>
+            <Link to="/track" className="navbar__link">Track Registration</Link>
+            <Link to="/interviewer/login" className="navbar__link">Interviewer Login</Link>
+          </>
         )}
       </div>
     </nav>

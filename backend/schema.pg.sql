@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS interviewers (
   created_at    TIMESTAMPTZ  DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Atomic registration-number generator — avoids the COUNT(*)+1 race where
+-- two concurrent submissions could compute the same next number.
+CREATE SEQUENCE IF NOT EXISTS reg_number_seq;
+
 CREATE TABLE IF NOT EXISTS registrations (
   id                      SERIAL       PRIMARY KEY,
   reg_number              TEXT         NOT NULL UNIQUE,
@@ -93,6 +97,53 @@ CREATE INDEX IF NOT EXISTS idx_reg_number     ON registrations(reg_number);
 CREATE INDEX IF NOT EXISTS idx_reg_status     ON registrations(status);
 CREATE INDEX IF NOT EXISTS idx_reg_interview  ON registrations(interview_date, interview_time);
 CREATE INDEX IF NOT EXISTS idx_comment_reg    ON interview_comments(registration_id);
+CREATE INDEX IF NOT EXISTS idx_reg_phone      ON registrations(phone_number);
+
+-- Prevents two candidates from ever holding the same interview slot,
+-- even under concurrent registration requests. Wrapped in a DO block so that
+-- if an existing database already has duplicate slots (from before this fix),
+-- the rest of this migration still applies instead of rolling back entirely —
+-- run `SELECT interview_date, interview_time, COUNT(*) FROM registrations
+-- GROUP BY 1,2 HAVING COUNT(*) > 1;` to find and manually resolve them, then
+-- re-run db:setup to add the index.
+DO $$
+BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_reg_slot ON registrations(interview_date, interview_time);
+EXCEPTION WHEN unique_violation OR others THEN
+  RAISE WARNING 'Could not create uq_reg_slot — duplicate (interview_date, interview_time) rows exist. Resolve them and re-run db:setup.';
+END $$;
+
+-- reg_number_seq starts at 1, but a database that already has rows from the
+-- old COUNT(*)+1 numbering scheme needs the sequence advanced past every
+-- number already issued, or the very next registration will collide with an
+-- existing reg_number. Only ever moves the sequence forward — safe to re-run.
+DO $$
+DECLARE
+  max_existing   INTEGER;
+  current_seq_val BIGINT;
+BEGIN
+  SELECT COALESCE(MAX(NULLIF(regexp_replace(reg_number, '^WB-\d{4}-', ''), '')::int), 0)
+    INTO max_existing
+    FROM registrations
+    WHERE reg_number ~ '^WB-\d{4}-\d+$';
+
+  SELECT last_value INTO current_seq_val FROM reg_number_seq;
+
+  IF max_existing > current_seq_val THEN
+    PERFORM setval('reg_number_seq', max_existing, true);
+  END IF;
+END $$;
+
+-- Audit trail / outbox for notifications (Phase 3). Log-only today; a real
+-- email/SMS driver can later read unsent rows from this table.
+CREATE TABLE IF NOT EXISTS notifications_log (
+  id              SERIAL       PRIMARY KEY,
+  event           TEXT         NOT NULL,
+  registration_id INTEGER      REFERENCES registrations(id) ON DELETE CASCADE,
+  payload         JSONB,
+  created_at      TIMESTAMPTZ  DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notif_reg ON notifications_log(registration_id);
 
 -- Migrations for existing databases (safe to re-run)
 ALTER TABLE registrations ADD COLUMN IF NOT EXISTS salvation_date      TEXT;

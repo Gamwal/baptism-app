@@ -2,40 +2,27 @@ const express  = require('express');
 const ExcelJS  = require('exceljs');
 const { pool }                       = require('../db');
 const { authenticate, requireAdmin } = require('../middleware/auth');
-const { getNextInterviewSlot } = require('../utils/scheduler');
+const { getNextInterviewSlot, toLocalDateStr } = require('../utils/scheduler');
+const { notify } = require('../utils/notifier');
+const {
+  MINOR_AGE, calcAge, isMinor: isMinorAge, isValidPhone, isValidEmail,
+  normalizePhone, checkExperienceDateOrder,
+} = require('../utils/validation');
 
 const router = express.Router();
 
-const MINOR_AGE = 18;
+const UNIQUE_VIOLATION = '23505'; // Postgres error code
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function isValidPhone(phone) {
-  if (!/^[\d\s+()-]+$/.test(phone)) return false;
-  const digits = phone.replace(/\D/g, '');
-  return digits.length >= 7 && digits.length <= 15;
-}
-
+/**
+ * Atomic — backed by a DB sequence, so two concurrent calls can never return
+ * the same number (unlike the old COUNT(*)+1 approach).
+ */
 async function generateRegNumber(pool) {
   const year = new Date().getFullYear();
-  const { rows } = await pool.query(
-    "SELECT COUNT(*)::integer AS cnt FROM registrations WHERE reg_number LIKE $1",
-    [`WB-${year}-%`]
-  );
-  const seq = String((rows[0].cnt || 0) + 1).padStart(5, '0');
+  const { rows } = await pool.query("SELECT nextval('reg_number_seq') AS n");
+  const seq = String(rows[0].n).padStart(5, '0');
   return `WB-${year}-${seq}`;
-}
-
-/** Whole-year age from a YYYY-MM-DD string, or null if invalid. */
-function calcAge(dob) {
-  if (!dob) return null;
-  const b = new Date(dob);
-  if (Number.isNaN(b.getTime())) return null;
-  const now = new Date();
-  let age = now.getFullYear() - b.getFullYear();
-  const m = now.getMonth() - b.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
-  return age >= 0 ? age : null;
 }
 
 // POST /api/registrations  (public)
@@ -55,7 +42,7 @@ router.post('/', async (req, res, next) => {
 
     // Age and minor status are derived from DOB on the server (not trusted from client)
     const age     = calcAge(dateOfBirth);
-    const isMinor = age != null && age < MINOR_AGE;
+    const isMinor = isMinorAge(age);
 
     const missing = [];
     if (!fullName?.trim())           missing.push('Full Name');
@@ -76,7 +63,7 @@ router.post('/', async (req, res, next) => {
     // Format checks (phone required, email optional)
     if (!isValidPhone(phoneNumber.trim()))
       return res.status(400).json({ error: 'Please enter a valid phone number.' });
-    if (email?.trim() && !EMAIL_RE.test(email.trim()))
+    if (email?.trim() && !isValidEmail(email.trim()))
       return res.status(400).json({ error: 'Please enter a valid email address.' });
 
     // Each checked experience needs a date (description is optional)
@@ -87,74 +74,141 @@ router.post('/', async (req, res, next) => {
     if (hasHolyGhost && !holyGhostDate)
       return res.status(400).json({ error: 'Holy Ghost baptism needs a date.' });
 
-    // Experiences must be chronological: Salvation → Sanctification → Holy Ghost
-    const orderedDates = [
-      hasSalvation      && salvationDate      ? salvationDate      : null,
-      hasSanctification && sanctificationDate ? sanctificationDate : null,
-      hasHolyGhost      && holyGhostDate      ? holyGhostDate      : null,
-    ].filter(Boolean);
-    for (let k = 1; k < orderedDates.length; k++) {
-      if (orderedDates[k] < orderedDates[k - 1])
-        return res.status(400).json({
-          error: 'Experience dates must follow the order: Salvation → Sanctification → Holy Ghost Baptism.',
-        });
+    const dateOrderError = checkExperienceDateOrder({
+      hasSalvation, salvationDate, hasSanctification, sanctificationDate, hasHolyGhost, holyGhostDate,
+    });
+    if (dateOrderError) return res.status(400).json({ error: dateOrderError });
+
+    // Duplicate guard: same phone number already has an open (non-declined) registration.
+    const normalizedPhone = normalizePhone(phoneNumber);
+    const { rows: existingRows } = await pool.query(
+      `SELECT reg_number, interview_date, interview_time, status
+       FROM registrations
+       WHERE regexp_replace(phone_number, '\\D', '', 'g') = $1
+         AND status != 'declined'
+       ORDER BY created_at DESC LIMIT 1`,
+      [normalizedPhone]
+    );
+    if (existingRows.length) {
+      const ex = existingRows[0];
+      return res.status(409).json({
+        error: `This phone number is already registered as ${ex.reg_number}. ` +
+          `Your interview is on ${ex.interview_date} at ${ex.interview_time}.`,
+        existing: {
+          regNumber: ex.reg_number,
+          interviewDate: ex.interview_date,
+          interviewTime: ex.interview_time,
+          status: ex.status,
+        },
+      });
     }
 
-    const regNumber = await generateRegNumber(pool);
-    const { interviewDate, interviewTime } = await getNextInterviewSlot(pool);
+    const insertParams = {
+      fullName: fullName.trim(), gender, dateOfBirth: dateOfBirth || null,
+      age: age != null ? String(age) : null, maritalStatus,
+      residentialAddress: residentialAddress.trim(), phoneNumber: phoneNumber.trim(),
+      email: email?.trim() || null,
+      occupation: occupation?.trim() || null, nationality: nationality?.trim() || null,
+      stateOfOrigin: stateOfOrigin?.trim() || null,
+      branchChurch: branchChurch.trim(), branchChurchId: branchChurchId?.trim() || null,
+      zone: zone?.trim() || null, zoneId: zoneId?.trim() || null,
+      area: area?.trim() || null, areaId: areaId?.trim() || null,
+      groupPastorName: groupPastorName?.trim() || null,
+      salvationExperience: hasSalvation ? (salvationExperience?.trim() || null) : null,
+      salvationDate: hasSalvation ? salvationDate : null,
+      sanctificationExperience: hasSanctification ? (sanctificationExperience?.trim() || null) : null,
+      sanctificationDate: hasSanctification ? sanctificationDate : null,
+      holyGhostBaptism: hasHolyGhost ? (holyGhostBaptism?.trim() || null) : null,
+      holyGhostDate: hasHolyGhost ? holyGhostDate : null,
+      previouslyBaptized: previouslyBaptized ? 1 : 0,
+      prevChurchName: prevChurchName?.trim() || null, prevModeOfBaptism: prevModeOfBaptism?.trim() || null,
+      prevBaptismDate: prevBaptismDate || null,
+      isMinor: isMinor ? 1 : 0,
+      guardianName: guardianName?.trim() || null, guardianPhone: guardianPhone?.trim() || null,
+      guardianConsent: guardianConsent ? 1 : 0, guardianSignature: guardianSignature?.trim() || null,
+    };
 
-    const { rows } = await pool.query(`
-      INSERT INTO registrations (
-        reg_number,
-        full_name, gender, date_of_birth, age, marital_status,
-        residential_address, phone_number, email, occupation, nationality, state_of_origin,
-        branch_church, branch_id, zone, zone_id, area, area_id, group_pastor_name,
-        salvation_experience, salvation_date,
-        sanctification_experience, sanctification_date,
-        holy_ghost_baptism, holy_ghost_date,
-        previously_baptized, prev_church_name, prev_mode_of_baptism, prev_baptism_date,
-        is_minor, guardian_name, guardian_phone, guardian_consent, guardian_signature,
-        interview_date, interview_time
-      ) VALUES (
-        $1,
-        $2,$3,$4,$5,$6,
-        $7,$8,$9,$10,$11,$12,
-        $13,$14,$15,$16,$17,$18,$19,
-        $20,$21,
-        $22,$23,
-        $24,$25,
-        $26,$27,$28,$29,
-        $30,$31,$32,$33,$34,
-        $35,$36
-      ) RETURNING id
-    `, [
-      regNumber,
-      fullName.trim(), gender, dateOfBirth || null, age != null ? String(age) : null, maritalStatus,
-      residentialAddress.trim(), phoneNumber.trim(), email?.trim() || null,
-      occupation?.trim() || null, nationality?.trim() || null, stateOfOrigin?.trim() || null,
-      branchChurch.trim(), branchChurchId?.trim() || null,
-      zone?.trim() || null, zoneId?.trim() || null,
-      area?.trim() || null, areaId?.trim() || null,
-      groupPastorName?.trim() || null,
-      hasSalvation ? (salvationExperience?.trim() || null) : null,           hasSalvation ? salvationDate : null,
-      hasSanctification ? (sanctificationExperience?.trim() || null) : null, hasSanctification ? sanctificationDate : null,
-      hasHolyGhost ? (holyGhostBaptism?.trim() || null) : null,              hasHolyGhost ? holyGhostDate : null,
-      previouslyBaptized ? 1 : 0,
-      prevChurchName?.trim() || null, prevModeOfBaptism?.trim() || null, prevBaptismDate || null,
-      isMinor ? 1 : 0,
-      guardianName?.trim() || null, guardianPhone?.trim() || null,
-      guardianConsent ? 1 : 0, guardianSignature?.trim() || null,
-      interviewDate, interviewTime,
-    ]);
+    // The slot search and the INSERT race against other concurrent requests:
+    // two people could both be handed the same free slot a moment apart. The
+    // `uq_reg_slot` unique index makes that impossible to persist — on a
+    // conflict we just re-pick the (now-updated) next free slot and retry.
+    const MAX_ATTEMPTS = 5;
+    let lastErr;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      try {
+        const regNumber = await generateRegNumber(pool);
+        const { interviewDate, interviewTime } = await getNextInterviewSlot(pool);
 
-    res.status(201).json({ regNumber, interviewDate, interviewTime, id: rows[0].id });
+        const { rows } = await pool.query(`
+          INSERT INTO registrations (
+            reg_number,
+            full_name, gender, date_of_birth, age, marital_status,
+            residential_address, phone_number, email, occupation, nationality, state_of_origin,
+            branch_church, branch_id, zone, zone_id, area, area_id, group_pastor_name,
+            salvation_experience, salvation_date,
+            sanctification_experience, sanctification_date,
+            holy_ghost_baptism, holy_ghost_date,
+            previously_baptized, prev_church_name, prev_mode_of_baptism, prev_baptism_date,
+            is_minor, guardian_name, guardian_phone, guardian_consent, guardian_signature,
+            interview_date, interview_time
+          ) VALUES (
+            $1,
+            $2,$3,$4,$5,$6,
+            $7,$8,$9,$10,$11,$12,
+            $13,$14,$15,$16,$17,$18,$19,
+            $20,$21,
+            $22,$23,
+            $24,$25,
+            $26,$27,$28,$29,
+            $30,$31,$32,$33,$34,
+            $35,$36
+          ) RETURNING id
+        `, [
+          regNumber,
+          insertParams.fullName, insertParams.gender, insertParams.dateOfBirth, insertParams.age, insertParams.maritalStatus,
+          insertParams.residentialAddress, insertParams.phoneNumber, insertParams.email,
+          insertParams.occupation, insertParams.nationality, insertParams.stateOfOrigin,
+          insertParams.branchChurch, insertParams.branchChurchId,
+          insertParams.zone, insertParams.zoneId,
+          insertParams.area, insertParams.areaId,
+          insertParams.groupPastorName,
+          insertParams.salvationExperience, insertParams.salvationDate,
+          insertParams.sanctificationExperience, insertParams.sanctificationDate,
+          insertParams.holyGhostBaptism, insertParams.holyGhostDate,
+          insertParams.previouslyBaptized,
+          insertParams.prevChurchName, insertParams.prevModeOfBaptism, insertParams.prevBaptismDate,
+          insertParams.isMinor,
+          insertParams.guardianName, insertParams.guardianPhone,
+          insertParams.guardianConsent, insertParams.guardianSignature,
+          interviewDate, interviewTime,
+        ]);
+
+        notify('registration.created', {
+          registrationId: rows[0].id, regNumber, phoneNumber: insertParams.phoneNumber,
+          interviewDate, interviewTime,
+        }).catch(() => {});
+
+        return res.status(201).json({ regNumber, interviewDate, interviewTime, id: rows[0].id });
+      } catch (err) {
+        // Slot was taken by a concurrent request between our check and our insert — retry.
+        if (err.code === UNIQUE_VIOLATION && err.constraint === 'uq_reg_slot') {
+          lastErr = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr || new Error('Could not book an interview slot after several attempts.');
   } catch (err) { next(err); }
 });
 
 // GET /api/registrations  (protected)
+// dateFrom/dateTo (YYYY-MM-DD, inclusive) filter by interview_date and switch
+// the sort to interview_date/time ascending — used by the interviewer
+// "Schedule" day-view instead of the default recent-first list.
 router.get('/', authenticate, async (req, res, next) => {
   try {
-    const { status, search, page = 1, limit = 50 } = req.query;
+    const { status, search, page = 1, limit = 50, dateFrom, dateTo } = req.query;
     const params = [];
     let i = 1;
     let where = 'WHERE 1=1';
@@ -168,6 +222,19 @@ router.get('/', authenticate, async (req, res, next) => {
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
       i += 3;
     }
+    if (dateFrom && DATE_RE.test(dateFrom)) {
+      where += ` AND r.interview_date >= $${i++}`;
+      params.push(dateFrom);
+    }
+    if (dateTo && DATE_RE.test(dateTo)) {
+      where += ` AND r.interview_date <= $${i++}`;
+      params.push(dateTo);
+    }
+
+    const isScheduleView = Boolean(dateFrom || dateTo);
+    const orderBy = isScheduleView
+      ? 'r.interview_date ASC, r.interview_time ASC'
+      : 'r.created_at DESC';
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
@@ -179,7 +246,7 @@ router.get('/', authenticate, async (req, res, next) => {
         FROM registrations r
         LEFT JOIN interviewers iv ON iv.id = r.interviewer_id
         ${where}
-        ORDER BY r.created_at DESC
+        ORDER BY ${orderBy}
         LIMIT $${i} OFFSET $${i+1}
       `, [...params, parseInt(limit), offset]),
       pool.query(
@@ -189,6 +256,31 @@ router.get('/', authenticate, async (req, res, next) => {
     ]);
 
     res.json({ registrations: rows, total: countRes.rows[0].total, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) { next(err); }
+});
+
+// GET /api/registrations/track/:regNumber  (public — status lookup by tracking number)
+// Only returns fields safe to show to an unauthenticated candidate: no
+// address, phone, spiritual answers, guardian info, or interviewer identity.
+router.get('/track/:regNumber', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT reg_number, full_name, status, interview_date, interview_time
+       FROM registrations WHERE reg_number = $1`,
+      [req.params.regNumber.trim().toUpperCase()]
+    );
+
+    if (!rows.length)
+      return res.status(404).json({ error: 'No registration found with that tracking number.' });
+
+    const r = rows[0];
+    res.json({
+      regNumber: r.reg_number,
+      fullName: r.full_name,
+      status: r.status,
+      interviewDate: r.interview_date,
+      interviewTime: r.interview_time,
+    });
   } catch (err) { next(err); }
 });
 
@@ -257,7 +349,7 @@ router.get('/export', authenticate, requireAdmin, async (_req, res, next) => {
       });
     }
 
-    const fileName = `baptism-registrations-${new Date().toISOString().split('T')[0]}.xlsx`;
+    const fileName = `baptism-registrations-${toLocalDateStr(new Date())}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     await wb.xlsx.write(res);

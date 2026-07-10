@@ -3,9 +3,9 @@ const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const { pool }          = require('../db');
 const { authenticate }  = require('../middleware/auth');
+const { jwtSecret: SECRET } = require('../config');
 
 const router = express.Router();
-const SECRET = process.env.JWT_SECRET || 'change-this-in-production';
 
 // POST /api/auth/login
 router.post('/login', async (req, res, next) => {

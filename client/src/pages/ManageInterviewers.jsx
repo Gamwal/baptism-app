@@ -1,14 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getInterviewers, createInterviewer, deleteInterviewer } from '../services/api';
+import { getInterviewers, createInterviewer, deleteInterviewer, resetInterviewerPassword } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { formatDateOnly as formatDate } from '../utils/format';
 
 const EMPTY_FORM = { name: '', email: '', password: '', role: 'interviewer' };
-
-function formatDate(str) {
-  if (!str) return '—';
-  return new Date(str).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 export default function ManageInterviewers() {
   const { user } = useAuth();
@@ -22,6 +18,8 @@ export default function ManageInterviewers() {
   const [saving, setSaving]     = useState(false);
   const [apiError, setApiError] = useState('');
   const [deletingId, setDeletingId] = useState(null);
+  const [resettingId, setResettingId] = useState(null);
+  const [resetResult, setResetResult] = useState(null); // { name, tempPassword }
 
   // Admins only
   useEffect(() => {
@@ -88,6 +86,21 @@ export default function ManageInterviewers() {
     }
   }
 
+  async function handleResetPassword(id, name) {
+    if (!window.confirm(`Reset ${name}'s password? Their current password will stop working immediately.`)) return;
+    setResettingId(id);
+    setApiError('');
+    setResetResult(null);
+    try {
+      const { tempPassword, interviewer } = await resetInterviewerPassword(id);
+      setResetResult({ name: interviewer.name, tempPassword });
+    } catch (err) {
+      setApiError(err.message);
+    } finally {
+      setResettingId(null);
+    }
+  }
+
   return (
     <main className="dashboard">
       <div className="container">
@@ -110,6 +123,25 @@ export default function ManageInterviewers() {
         </div>
 
         {apiError && <div className="alert alert--error" style={{ marginBottom: '1rem' }}>{apiError}</div>}
+
+        {resetResult && (
+          <div className="card card--sm" style={{ marginBottom: '1.5rem', background: 'var(--blue-50)', border: '1.5px solid var(--blue-100)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--blue-900)', marginBottom: '.25rem' }}>
+                  New temporary password for {resetResult.name}
+                </div>
+                <div style={{ fontFamily: 'monospace', fontSize: '1.3rem', fontWeight: 700, color: 'var(--blue-800)', letterSpacing: '.05em' }}>
+                  {resetResult.tempPassword}
+                </div>
+                <p className="text-muted" style={{ marginTop: '.4rem' }}>
+                  Share this with them now — it will not be shown again. They should change it after logging in.
+                </p>
+              </div>
+              <button className="btn btn--secondary btn--sm" onClick={() => setResetResult(null)}>Dismiss</button>
+            </div>
+          </div>
+        )}
 
         {/* Add form */}
         {showForm && (
@@ -209,17 +241,26 @@ export default function ManageInterviewers() {
                     </td>
                     <td>{formatDate(iv.created_at)}</td>
                     <td>
-                      {iv.id !== user?.id ? (
+                      <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
                         <button
-                          className="btn btn--danger btn--sm"
-                          onClick={() => handleDelete(iv.id, iv.name)}
-                          disabled={deletingId === iv.id}
+                          className="btn btn--outline btn--sm"
+                          onClick={() => handleResetPassword(iv.id, iv.name)}
+                          disabled={resettingId === iv.id}
                         >
-                          {deletingId === iv.id ? 'Removing…' : 'Remove'}
+                          {resettingId === iv.id ? 'Resetting…' : 'Reset Password'}
                         </button>
-                      ) : (
-                        <span style={{ fontSize: '.8rem', color: 'var(--gray-400)' }}>—</span>
-                      )}
+                        {iv.id !== user?.id ? (
+                          <button
+                            className="btn btn--danger btn--sm"
+                            onClick={() => handleDelete(iv.id, iv.name)}
+                            disabled={deletingId === iv.id}
+                          >
+                            {deletingId === iv.id ? 'Removing…' : 'Remove'}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '.8rem', color: 'var(--gray-400)', alignSelf: 'center' }}>(you)</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

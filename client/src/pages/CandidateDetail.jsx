@@ -1,30 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getRegistration, addComment, certifyCandidate, declineCandidate } from '../services/api';
+import {
+  getRegistration, addComment, certifyCandidate, declineCandidate,
+  getFreeSlots, rescheduleInterview,
+} from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { formatDate, formatTime, formatDateTime, todayLocalDateStr } from '../utils/format';
 
 function StatusBadge({ status }) {
   return <span className={`badge badge--${status}`} style={{ fontSize: '.85rem', padding: '.3rem .85rem' }}>{status}</span>;
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const [y, m, d] = dateStr.split('-');
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${d} ${months[parseInt(m) - 1]} ${y}`;
-}
-
-function formatTime(t) {
-  if (!t) return '—';
-  const [h, m] = t.split(':').map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
-}
-
-function formatDateTime(str) {
-  if (!str) return '—';
-  const d = new Date(str);
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit' });
 }
 
 function InfoField({ label, value }) {
@@ -61,6 +45,31 @@ function ExperienceView({ label, date, text }) {
   );
 }
 
+function RescheduleTimes({ date, times, allowedDay, loading, error, selected, onSelect }) {
+  if (!date) return null;
+  if (loading) return <p className="text-muted" style={{ marginTop: '.75rem' }}>Loading available times…</p>;
+  if (error)   return <div className="alert alert--error" style={{ marginTop: '.75rem' }}>{error}</div>;
+  if (!allowedDay)
+    return <p className="form-error" style={{ marginTop: '.75rem' }}>Interviews are not held on that day of the week.</p>;
+  if (!times.length)
+    return <p className="form-error" style={{ marginTop: '.75rem' }}>No free slots on that date — try another day.</p>;
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', marginTop: '.75rem' }}>
+      {times.map(t => (
+        <button
+          key={t}
+          type="button"
+          onClick={() => onSelect(t)}
+          className={`btn btn--sm ${selected === t ? 'btn--primary' : 'btn--secondary'}`}
+        >
+          {formatTime(t)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Section({ title, children }) {
   return (
     <div className="card card--sm" style={{ marginBottom: '1rem' }}>
@@ -83,6 +92,15 @@ export default function CandidateDetail() {
   const [submitting, setSubmitting]     = useState(false);
   const [actionError, setActionError]   = useState('');
   const [confirmAction, setConfirmAction] = useState(null); // 'certify' | 'decline'
+
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('');
+  const [slotOptions, setSlotOptions]       = useState({ times: [], allowedDay: true });
+  const [slotsLoading, setSlotsLoading]     = useState(false);
+  const [slotsError, setSlotsError]         = useState('');
+  const [rescheduleSaving, setRescheduleSaving] = useState(false);
+  const [rescheduleError, setRescheduleError]   = useState('');
 
   async function loadData() {
     try {
@@ -110,6 +128,42 @@ export default function CandidateDetail() {
       setActionError(err.message);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function loadFreeSlots(date) {
+    setSlotsLoading(true);
+    setSlotsError('');
+    setRescheduleTime('');
+    try {
+      const data = await getFreeSlots(date, id);
+      setSlotOptions({ times: data.times, allowedDay: data.allowedDay });
+    } catch (err) {
+      setSlotsError(err.message);
+    } finally {
+      setSlotsLoading(false);
+    }
+  }
+
+  function handleDateChange(date) {
+    setRescheduleDate(date);
+    if (date) loadFreeSlots(date);
+  }
+
+  async function handleReschedule() {
+    if (!rescheduleDate || !rescheduleTime) return;
+    setRescheduleSaving(true);
+    setRescheduleError('');
+    try {
+      await rescheduleInterview(id, rescheduleDate, rescheduleTime);
+      setShowReschedule(false);
+      setRescheduleDate('');
+      setRescheduleTime('');
+      await loadData();
+    } catch (err) {
+      setRescheduleError(err.message);
+    } finally {
+      setRescheduleSaving(false);
     }
   }
 
@@ -170,6 +224,17 @@ export default function CandidateDetail() {
           {!isClosed && (
             <div className="detail-actions">
               <button
+                className="btn btn--outline"
+                onClick={() => {
+                  setShowReschedule(s => !s);
+                  setRescheduleError('');
+                  setRescheduleDate('');
+                  setRescheduleTime('');
+                }}
+              >
+                Reschedule
+              </button>
+              <button
                 className="btn btn--success"
                 onClick={() => { setConfirmAction('certify'); setActionError(''); }}
               >
@@ -184,6 +249,52 @@ export default function CandidateDetail() {
             </div>
           )}
         </div>
+
+        {/* Reschedule panel */}
+        {showReschedule && (
+          <div className="card" style={{ marginBottom: '1rem', border: '2px solid var(--blue-100)' }}>
+            <h3 style={{ marginBottom: '.75rem', color: 'var(--blue-800)' }}>
+              Reschedule Interview
+            </h3>
+            <p className="text-muted" style={{ marginBottom: '1rem' }}>
+              Currently {formatDate(r.interview_date)} at {formatTime(r.interview_time)}.
+            </p>
+
+            <div className="form-group">
+              <label className="form-label">New Date</label>
+              <input
+                type="date"
+                className="form-input"
+                min={todayLocalDateStr()}
+                value={rescheduleDate}
+                onChange={e => handleDateChange(e.target.value)}
+              />
+            </div>
+
+            <RescheduleTimes
+              date={rescheduleDate}
+              times={slotOptions.times}
+              allowedDay={slotOptions.allowedDay}
+              loading={slotsLoading}
+              error={slotsError}
+              selected={rescheduleTime}
+              onSelect={setRescheduleTime}
+            />
+
+            {rescheduleError && <div className="alert alert--error mt-2">{rescheduleError}</div>}
+
+            <div style={{ display: 'flex', gap: '.75rem', marginTop: '1.25rem' }}>
+              <button
+                className="btn btn--primary"
+                onClick={handleReschedule}
+                disabled={!rescheduleDate || !rescheduleTime || rescheduleSaving}
+              >
+                {rescheduleSaving ? <><span className="spinner" /> Saving…</> : 'Confirm New Time'}
+              </button>
+              <button className="btn btn--secondary" onClick={() => setShowReschedule(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
 
         {/* Confirm action modal-like inline */}
         {confirmAction && (

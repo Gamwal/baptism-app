@@ -50,6 +50,9 @@ export const getRegistrations = (params = {}) => {
 
 export const getRegistration = (id) => request(`/registrations/${id}`);
 
+export const trackRegistration = (regNumber) =>
+  request(`/registrations/track/${encodeURIComponent(regNumber)}`);
+
 // ── Interviews ────────────────────────────────────────────────────────────────
 export const getStats = () => request('/interviews/stats');
 
@@ -71,6 +74,17 @@ export const declineCandidate = (registrationId, comment) =>
     body: JSON.stringify({ comment }),
   });
 
+export const getFreeSlots = (date, excludeRegistrationId) => {
+  const qs = new URLSearchParams({ date, ...(excludeRegistrationId ? { excludeRegistrationId } : {}) });
+  return request(`/interviews/free-slots?${qs.toString()}`);
+};
+
+export const rescheduleInterview = (registrationId, date, time) =>
+  request(`/interviews/${registrationId}/reschedule`, {
+    method: 'PATCH',
+    body: JSON.stringify({ date, time }),
+  });
+
 // ── Interviewers (admin only) ─────────────────────────────────────────────────
 export const getInterviewers = () => request('/interviewers');
 
@@ -79,6 +93,9 @@ export const createInterviewer = (data) =>
 
 export const deleteInterviewer = (id) =>
   request(`/interviewers/${id}`, { method: 'DELETE' });
+
+export const resetInterviewerPassword = (id) =>
+  request(`/interviewers/${id}/reset-password`, { method: 'PATCH' });
 
 // ── Interview slot settings ──────────────────────────────────────────────────
 export const getSettings    = ()        => request('/settings');

@@ -11,6 +11,7 @@ import CandidateDetail     from './pages/CandidateDetail';
 import ManageInterviewers  from './pages/ManageInterviewers';
 import SettingsPage        from './pages/SettingsPage';
 import ChangePassword      from './pages/ChangePassword';
+import TrackRegistration   from './pages/TrackRegistration';
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
           <Routes>
             <Route path="/"                         element={<RegistrationForm />} />
             <Route path="/success"                  element={<RegistrationSuccess />} />
+            <Route path="/track"                    element={<TrackRegistration />} />
             <Route path="/interviewer/login"        element={<InterviewerLogin />} />
             <Route path="/interviewer/dashboard"    element={
               <ProtectedRoute><InterviewerDashboard /></ProtectedRoute>

@@ -1,10 +1,24 @@
 const express = require('express');
 const bcrypt  = require('bcryptjs');
+const crypto  = require('crypto');
 const { pool }                   = require('../db');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(authenticate, requireAdmin);
+
+// Alphabet avoids visually ambiguous characters (0/O, 1/l/I) for a password
+// that's read off a screen and typed by hand.
+const TEMP_PASSWORD_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+
+function generateTempPassword(length = 10) {
+  const bytes = crypto.randomBytes(length);
+  let out = '';
+  for (let i = 0; i < length; i++) {
+    out += TEMP_PASSWORD_ALPHABET[bytes[i] % TEMP_PASSWORD_ALPHABET.length];
+  }
+  return out;
+}
 
 // GET /api/interviewers
 router.get('/', async (req, res, next) => {
@@ -37,6 +51,25 @@ router.post('/', async (req, res, next) => {
       [name.trim(), email.trim().toLowerCase(), hash, role]
     );
     res.status(201).json({ interviewer: rows[0] });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/interviewers/:id/reset-password
+// Generates a new random temporary password, stores its hash, and returns
+// the plaintext once so the admin can hand it to the interviewer. It is
+// never stored or logged in plaintext anywhere.
+router.patch('/:id/reset-password', async (req, res, next) => {
+  try {
+    const { rows: existing } = await pool.query(
+      'SELECT id, name, email FROM interviewers WHERE id = $1', [req.params.id]
+    );
+    if (!existing.length) return res.status(404).json({ error: 'Interviewer not found.' });
+
+    const tempPassword = generateTempPassword();
+    const hash = await bcrypt.hash(tempPassword, 10);
+    await pool.query('UPDATE interviewers SET password_hash = $1 WHERE id = $2', [hash, req.params.id]);
+
+    res.json({ tempPassword, interviewer: existing[0] });
   } catch (err) { next(err); }
 });
 

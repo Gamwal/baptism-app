@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
-
-const SECRET = process.env.JWT_SECRET || 'change-this-in-production';
+const { jwtSecret: SECRET } = require('../config');
 
 /**
  * Verifies the JWT in the Authorization header.

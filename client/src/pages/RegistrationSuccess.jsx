@@ -1,20 +1,6 @@
 import { useLocation, Link } from 'react-router-dom';
 import { AFC_LOGO, JESUS_MARK, CHURCH_NAME } from '../components/Logo';
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const [y, m, d] = dateStr.split('-');
-  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  return `${d} ${months[parseInt(m) - 1]} ${y}`;
-}
-
-function formatTime(timeStr) {
-  if (!timeStr) return '—';
-  const [h, m] = timeStr.split(':').map(Number);
-  const ampm   = h >= 12 ? 'PM' : 'AM';
-  const hour   = h % 12 || 12;
-  return `${hour}:${String(m).padStart(2, '0')} ${ampm}`;
-}
+import { formatDateLong as formatDate, formatTime } from '../utils/format';
 
 /** Fetch a local image and turn it into a data URL so jsPDF can embed it. */
 async function loadImageDataUrl(src) {
@@ -197,6 +183,10 @@ export default function RegistrationSuccess() {
           </button>
           <Link to="/" className="btn btn--outline">Register Another Candidate</Link>
         </div>
+
+        <p className="text-muted text-center mt-2">
+          <Link to="/track">Check your registration status anytime →</Link>
+        </p>
       </div>
     </div>
   );

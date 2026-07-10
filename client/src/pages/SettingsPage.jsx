@@ -2,16 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSettings, updateSettings } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { pad, formatHour } from '../utils/format';
 
 const SLOT_OPTIONS = [10, 15, 20, 30, 45, 60];
 const DAY_LABELS   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-function pad(h) { return String(h).padStart(2, '0'); }
-function formatHour(h) {
-  const am = h < 12;
-  const hh = h % 12 || 12;
-  return `${hh}:00 ${am ? 'AM' : 'PM'}`;
-}
 
 export default function SettingsPage() {
   const { user } = useAuth();

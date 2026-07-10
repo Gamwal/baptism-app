@@ -6,4 +6,6 @@ package-lock.json
 .vercel
 .env*
 */.env*
-*/*/.evn*
+*/*/.env*
+client/dist/
+coverage/
